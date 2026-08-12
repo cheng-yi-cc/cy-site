@@ -1,0 +1,21 @@
+{
+  "name": "cy-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "content": "node scripts/build-content.mjs",
+    "predev": "node scripts/build-content.mjs",
+    "dev": "astro dev",
+    "prebuild": "node scripts/build-content.mjs",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.0.0",
+    "gray-matter": "^4.0.3",
+    "katex": "^0.18.4",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0"
+  }
+}

@@ -1,0 +1,27 @@
+---
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  project: CollectionEntry<'projects'>;
+}
+
+const { project } = Astro.props;
+const d = project.data;
+---
+
+<a class="card" href={`/projects/${project.id}/`}>
+  <h3>{d.title}</h3>
+  <p class="desc">{d.description || '暂无简介'}</p>
+  <div class="meta">
+    {
+      d.language && (
+        <span class="chip">
+          <span class="lang-dot"></span>{d.language}
+        </span>
+      )
+    }
+    <span class="chip">★ {d.stars}</span>
+    <span class="chip">Fork {d.forks}</span>
+    <span class="meta-link">详情 →</span>
+  </div>
+</a>

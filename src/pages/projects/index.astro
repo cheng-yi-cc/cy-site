@@ -1,0 +1,32 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import ProjectCard from '../../components/ProjectCard.astro';
+
+const projects = (await getCollection('projects')).sort(
+  (a, b) => b.data.stars - a.data.stars
+);
+---
+
+<Base title="项目" description="项目作品列表">
+  <div class="container">
+    <header class="page-head">
+      <h1>项目作品</h1>
+      <p>我在 GitHub 上的开源与练习作品</p>
+    </header>
+    <div class="list-wrap" style="padding-left: 0; padding-right: 0;">
+      {
+        projects.length > 0 ? (
+          <div class="card-grid">
+            {projects.map((p) => <ProjectCard project={p} />)}
+          </div>
+        ) : (
+          <div class="empty">
+            还没有项目 —— 在 config/projects.json
+            中添加你的仓库，推送后自动上线
+          </div>
+        )
+      }
+    </div>
+  </div>
+</Base>

@@ -1,0 +1,96 @@
+---
+import { getCollection, render } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+
+export async function getStaticPaths() {
+  const projects = await getCollection('projects');
+  return projects.map((project) => ({
+    params: { slug: project.id },
+    props: { project },
+  }));
+}
+
+const { project } = Astro.props;
+const { Content } = await render(project);
+const d = project.data;
+const updatedStr = d.updated
+  ? new Date(d.updated).toLocaleDateString('zh-CN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    })
+  : '';
+---
+
+<Base title={d.title} description={d.description}>
+  <div class="container">
+    <article class="page-body">
+      <header class="project-head">
+        <h1>{d.title}</h1>
+        {d.description && <p class="project-desc">{d.description}</p>}
+        <div class="chip-row">
+          {
+            d.language && (
+              <span class="chip">
+                <span class="lang-dot" />
+                {d.language}
+              </span>
+            )
+          }
+          <span class="chip">★ {d.stars}</span>
+          <span class="chip">Fork {d.forks}</span>
+          {updatedStr && <span class="chip">更新于 {updatedStr}</span>}
+        </div>
+        {
+          d.topics.length > 0 && (
+            <div class="chip-row topics">
+              {d.topics.map((t) => (
+                <span class="chip topic"># {t}</span>
+              ))}
+            </div>
+          )
+        }
+        <div class="project-actions">
+          <a
+            class="btn btn-primary"
+            href={d.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            在 GitHub 上查看 ↗
+          </a>
+          <a
+            class="btn"
+            href={`${d.url}/issues`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Issues
+          </a>
+          <a
+            class="btn"
+            href={`https://github.com/${d.repo}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            仓库主页
+          </a>
+        </div>
+      </header>
+
+      <details class="readme-box" open>
+        <summary>
+          README
+          <span class="readme-hint">点击标题栏可折叠 / 展开</span>
+        </summary>
+        <div class="readme-body prose">
+          <Content />
+        </div>
+      </details>
+
+      <div class="back-link">
+        <a href="/projects/">← 返回项目列表</a>
+      </div>
+    </article>
+  </div>
+</Base>

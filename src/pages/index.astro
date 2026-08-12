@@ -1,0 +1,83 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import ProjectCard from '../components/ProjectCard.astro';
+import ArticleCard from '../components/ArticleCard.astro';
+import site from '../../config/site.json';
+
+const projects = (await getCollection('projects')).sort(
+  (a, b) => b.data.stars - a.data.stars
+);
+const articles = (await getCollection('articles')).sort(
+  (a, b) => (b.data.date?.getTime() ?? 0) - (a.data.date?.getTime() ?? 0)
+);
+const latestArticles = articles.slice(0, 6);
+---
+
+<Base>
+  <section class="hero container">
+    <h1>
+      {site.heroGreeting}，我是 <span class="accent">{site.name}</span>
+    </h1>
+    <p class="bio">{site.bio}</p>
+    <div class="hero-actions">
+      <a
+        class="btn btn-primary"
+        href={site.github}
+        target="_blank"
+        rel="noopener noreferrer">GitHub ↗</a
+      >
+      <a class="btn" href="/articles/">阅读文章</a>
+      <a class="btn" href="/projects/">查看项目</a>
+    </div>
+  </section>
+
+  <section class="section container">
+    <div class="section-head">
+      <h2>项目作品</h2>
+      {
+        projects.length > 0 && (
+          <a class="more-link" href="/projects/">
+            全部项目 →
+          </a>
+        )
+      }
+    </div>
+    {
+      projects.length > 0 ? (
+        <div class="card-grid">
+          {projects.map((p) => <ProjectCard project={p} />)}
+        </div>
+      ) : (
+        <div class="empty">
+          还没有项目 —— 在 config/projects.json
+          中添加你的仓库，推送后自动上线
+        </div>
+      )
+    }
+  </section>
+
+  <section class="section container">
+    <div class="section-head">
+      <h2>最近文章</h2>
+      {
+        articles.length > 0 && (
+          <a class="more-link" href="/articles/">
+            全部文章 →
+          </a>
+        )
+      }
+    </div>
+    {
+      latestArticles.length > 0 ? (
+        <div class="card-grid">
+          {latestArticles.map((a) => <ArticleCard article={a} />)}
+        </div>
+      ) : (
+        <div class="empty">
+          还没有文章 —— 把 Word 或 Markdown 文件放进 articles/ 目录即可
+        </div>
+      )
+    }
+  </section>
+</Base>

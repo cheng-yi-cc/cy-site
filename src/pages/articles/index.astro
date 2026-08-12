@@ -1,0 +1,42 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+
+const articles = (await getCollection('articles')).sort(
+  (a, b) => (b.data.date?.getTime() ?? 0) - (a.data.date?.getTime() ?? 0)
+);
+---
+
+<Base title="文章" description="全部文章列表">
+  <div class="container">
+    <header class="page-head">
+      <h1>文章</h1>
+      <p>共 {articles.length} 篇</p>
+    </header>
+    <div class="list-wrap" style="padding-left: 0; padding-right: 0;">
+      {
+        articles.length > 0 ? (
+          <div class="article-list">
+            {articles.map((a) => {
+              const d = a.data;
+              return (
+                <a class="article-item" href={`/articles/${a.id}/`}>
+                  <span class="card-date">
+                    {d.date ? d.date.toISOString().slice(0, 10) : '未标注日期'}
+                    {d.source === 'docx' ? ' · Word 文档' : ''}
+                  </span>
+                  <h2>{d.title}</h2>
+                  {d.summary && <p class="desc">{d.summary}</p>}
+                </a>
+              );
+            })}
+          </div>
+        ) : (
+          <div class="empty">
+            还没有文章 —— 把 Word 或 Markdown 文件放进 articles/ 目录即可
+          </div>
+        )
+      }
+    </div>
+  </div>
+</Base>

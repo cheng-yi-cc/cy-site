@@ -1,0 +1,23 @@
+---
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  article: CollectionEntry<'articles'>;
+}
+
+const { article } = Astro.props;
+const d = article.data;
+const dateStr = d.date ? d.date.toISOString().slice(0, 10) : '';
+---
+
+<a class="card" href={`/articles/${article.id}/`}>
+  <div class="card-date">
+    {dateStr}{d.source === 'docx' ? ' · Word 文档' : ''}
+  </div>
+  <h3>{d.title}</h3>
+  {d.summary && <p class="desc">{d.summary}</p>}
+  <div class="meta">
+    {d.tags.map((t) => <span class="chip"># {t}</span>)}
+    <span class="meta-link">阅读全文 →</span>
+  </div>
+</a>

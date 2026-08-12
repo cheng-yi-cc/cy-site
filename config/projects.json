@@ -1,0 +1,9 @@
+{
+  "_说明": "在 projects 数组中列出想展示的仓库。repo 填 GitHub 仓库全名（用户名/仓库名）；note 可选，用来覆盖仓库自带的简介。修改本文件并推送后，网站自动更新。",
+  "projects": [
+    {
+      "repo": "expressjs/express",
+      "note": "示例项目——请打开 config/projects.json，把这一条替换成你自己的仓库"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+generated/
+public/media/
+config/.github-token
+.astro/
+.DS_Store
+Thumbs.db
