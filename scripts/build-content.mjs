@@ -306,6 +306,7 @@ async function buildArticles() {
 
 /* ---------------- 项目处理（GitHub） ---------------- */
 
+// GitHub 请求：网络抖动 / 429 / 5xx 自动重试，单请求 20s 超时
 async function ghFetch(url, accept, token) {
   const headers = {
     'User-Agent': USER_AGENT,
@@ -313,9 +314,31 @@ async function ghFetch(url, accept, token) {
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(url, { headers, redirect: 'follow' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}（${url}）`);
-  return res;
+
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) return res;
+      if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        continue;
+      }
+      throw new Error(`HTTP ${res.status}（${url}）`);
+    } catch (err) {
+      lastErr = err;
+      if (err.message && err.message.startsWith('HTTP ')) throw err;
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+        continue;
+      }
+    }
+  }
+  throw lastErr;
 }
 
 async function rewriteReadme(readme, { repo, branch, slug }) {
@@ -335,6 +358,7 @@ async function rewriteReadme(readme, { repo, branch, slug }) {
         const res = await fetch(url, {
           redirect: 'follow',
           headers: { 'User-Agent': USER_AGENT },
+          signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         await ensureDir(mediaDestDir);
@@ -409,11 +433,9 @@ async function rewriteReadme(readme, { repo, branch, slug }) {
   return out;
 }
 
-async function processProject(repo, note, token) {
+async function processProject(meta, note, token) {
+  const repo = meta.full_name;
   const slug = slugify(repo.replace('/', '-'));
-  const meta = await (
-    await ghFetch(`https://api.github.com/repos/${repo}`, undefined, token)
-  ).json();
 
   let readme = '';
   try {
@@ -434,11 +456,14 @@ async function processProject(repo, note, token) {
     : '> 该仓库没有 README。';
   body = stripLeadingH1(body);
 
+  // 简介优先级：手动 notes → GitHub 仓库简介 → README 第一段
+  const description = note || meta.description || deriveSummary(readme);
+
   const fm = toFrontmatter({
     title: meta.name,
     repo,
     url: meta.html_url,
-    description: note || meta.description || '',
+    description,
     stars: meta.stargazers_count ?? 0,
     forks: meta.forks_count ?? 0,
     language: meta.language || undefined,
@@ -463,6 +488,49 @@ async function loadLocalToken() {
   }
 }
 
+// 拉取用户名下所有公开仓库（自动翻页）
+async function fetchAllUserRepos(user, token) {
+  const repos = [];
+  let url = `https://api.github.com/users/${user}/repos?per_page=100&sort=full_name`;
+  while (url) {
+    const res = await ghFetch(url, undefined, token);
+    repos.push(...(await res.json()));
+    const link = res.headers.get('link') || '';
+    const next = link.match(/<([^>]+)>;\s*rel="next"/);
+    url = next ? next[1] : null;
+  }
+  return repos;
+}
+
+// 纯函数：按配置挑出要展示的仓库
+// - showAll=true：展示全部（自动跳过 fork，hidden 里的除外），按星标排序
+// - showAll=false：只展示 selected 里的，顺序即展示顺序
+function pickRepos(allRepos, cfg) {
+  const byName = new Map(allRepos.map((r) => [r.name.toLowerCase(), r]));
+  const hidden = new Set((cfg.hidden || []).map((n) => String(n).toLowerCase()));
+  const picked = [];
+  const missing = [];
+
+  if (cfg.showAll) {
+    for (const r of allRepos) {
+      if (r.fork || hidden.has(r.name.toLowerCase())) continue;
+      picked.push(r);
+    }
+    picked.sort(
+      (a, b) =>
+        (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0) ||
+        new Date(b.pushed_at || 0) - new Date(a.pushed_at || 0)
+    );
+  } else {
+    for (const name of cfg.selected || []) {
+      const r = byName.get(String(name).toLowerCase());
+      if (r) picked.push(r);
+      else missing.push(name);
+    }
+  }
+  return { picked, missing };
+}
+
 async function buildProjects() {
   await ensureDir(GEN_PROJECTS);
   if (!(await exists(PROJECTS_CONFIG))) {
@@ -470,34 +538,60 @@ async function buildProjects() {
     return;
   }
   const cfg = JSON.parse(await fs.readFile(PROJECTS_CONFIG, 'utf8'));
-  const list = Array.isArray(cfg) ? cfg : cfg.projects || [];
-  if (!list.length) {
-    console.log('[项目] 项目列表为空');
+
+  // GitHub 用户名从 config/site.json 的 github 链接里解析
+  const site = JSON.parse(
+    await fs.readFile(path.join(ROOT, 'config', 'site.json'), 'utf8')
+  );
+  const userMatch = (site.github || '').match(/github\.com\/([^/?#]+)/i);
+  if (!userMatch) {
+    console.warn('[项目] 无法从 config/site.json 的 github 字段解析用户名，跳过');
     return;
   }
+  const user = userMatch[1];
+
   const token =
     process.env.GITHUB_TOKEN ||
     process.env.GH_TOKEN ||
     (await loadLocalToken());
+
+  let all;
+  try {
+    all = await fetchAllUserRepos(user, token);
+  } catch (err) {
+    console.warn(`[项目] 获取 ${user} 的仓库列表失败：${err.message}`);
+    return;
+  }
+  console.log(`[项目] 账号 ${user} 下共有 ${all.length} 个公开仓库`);
+
+  const { picked, missing } = pickRepos(all, cfg);
+  if (missing.length) {
+    console.warn(
+      `[项目] selected 里未找到：${missing.join('、')}。可用仓库名：${all
+        .map((r) => r.name)
+        .join('、')}`
+    );
+  }
+  if (!picked.length) {
+    console.log('[项目] 没有要展示的仓库（selected 为空）');
+    return;
+  }
+
+  // notes：为指定仓库覆盖简介（键为仓库名，大小写不敏感）
+  const notes = new Map(
+    Object.entries(cfg.notes || {}).map(([k, v]) => [k.toLowerCase(), v])
+  );
+
   let ok = 0;
-  for (const item of list) {
-    const repo = typeof item === 'string' ? item : item.repo;
-    if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-      console.warn(`[项目] 仓库名不合法：${repo}，跳过`);
-      continue;
-    }
+  for (const meta of picked) {
     try {
-      await processProject(
-        repo,
-        typeof item === 'string' ? undefined : item.note,
-        token
-      );
+      await processProject(meta, notes.get(meta.name.toLowerCase()), token);
       ok++;
     } catch (err) {
-      console.warn(`[项目] 抓取 ${repo} 失败：${err.message}，跳过`);
+      console.warn(`[项目] 处理 ${meta.full_name} 失败：${err.message}，跳过`);
     }
   }
-  console.log(`[项目] 完成 ${ok}/${list.length} 个`);
+  console.log(`[项目] 完成 ${ok}/${picked.length} 个`);
 }
 
 /* ---------------- 主流程 ---------------- */
@@ -508,6 +602,11 @@ async function main() {
   await fs.rm(GEN_DIR, { recursive: true, force: true });
   await fs.rm(path.join(MEDIA_DIR, 'articles'), { recursive: true, force: true });
   await fs.rm(path.join(MEDIA_DIR, 'projects'), { recursive: true, force: true });
+  // generated/ 每次整体重建，Astro 的增量内容缓存必然全部失效，
+  // 清掉它，避免内容变更时出现 "Duplicate id" 合并告警
+  await fs.rm(path.join(ROOT, 'node_modules', '.astro', 'data-store.json'), {
+    force: true,
+  });
 
   await buildArticles();
   await buildProjects();
@@ -528,4 +627,4 @@ if (isMain) {
   });
 }
 
-export { rewriteReadme, slugify, stripLeadingH1, deriveSummary };
+export { rewriteReadme, slugify, stripLeadingH1, deriveSummary, pickRepos };
