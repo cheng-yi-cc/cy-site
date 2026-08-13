@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decideDocxCommitMetadata } from './build-content.mjs';
+import {
+  decideDocxCommitMetadata,
+  rewriteDocxMediaReferences,
+  extractImageUrls,
+  validateDocxImageReferences,
+} from './build-content.mjs';
 
 const article = 'articles/2026-08-13-示例.docx';
 
@@ -55,5 +60,57 @@ test('Word 与网站代码混在一次提交时失败', () => {
         body: '摘要',
       }),
     /必须单独提交/
+  );
+});
+
+test('Word 图片的 Windows 绝对路径会改成站内地址', () => {
+  const mediaSrc = 'D:\\My Project\\CY\\generated\\.tmp-docx\\示例\\media';
+  const body =
+    '<img src="D:\\My Project\\CY\\generated\\.tmp-docx\\示例/media/image1.png" style="width:6.5in" />';
+  const rewritten = rewriteDocxMediaReferences(body, {
+    mediaSrc,
+    publicPrefix: '/media/articles/示例',
+  });
+
+  assert.match(rewritten, /src="\/media\/articles\/示例\/image1\.png"/);
+  assert.doesNotMatch(rewritten, /D:\\My Project/);
+});
+
+test('Word 图片的 Linux 绝对路径会改成站内地址', () => {
+  const mediaSrc =
+    '/home/runner/work/cy-site/cy-site/generated/.tmp-docx/示例/media';
+  const body =
+    '![截图](/home/runner/work/cy-site/cy-site/generated/.tmp-docx/示例/media/image2.png)';
+  const rewritten = rewriteDocxMediaReferences(body, {
+    mediaSrc,
+    publicPrefix: '/media/articles/示例',
+  });
+
+  assert.equal(rewritten, '![截图](/media/articles/示例/image2.png)');
+});
+
+test('Word 图片的相对路径和特殊文件名会安全转换', () => {
+  const rewritten = rewriteDocxMediaReferences(
+    '<img src="./media/截图%20%231.png" /><img src="https://example.com/cover.png" />',
+    {
+      mediaSrc: '/tmp/article/media',
+      publicPrefix: '/media/articles/示例',
+    }
+  );
+
+  assert.deepEqual(extractImageUrls(rewritten), [
+    '/media/articles/示例/%E6%88%AA%E5%9B%BE%20%231.png',
+    'https://example.com/cover.png',
+  ]);
+});
+
+test('Word 图片文件缺失时构建会直接失败', async () => {
+  await assert.rejects(
+    () =>
+      validateDocxImageReferences(
+        '<img src="/media/articles/__test-missing__/image404.png" />',
+        '__test-missing__'
+      ),
+    /图片文件缺失/
   );
 });

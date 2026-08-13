@@ -289,6 +289,120 @@ async function rehostLocalImages(body, baseDir, urlPrefix) {
   return out;
 }
 
+function unwrapImageUrl(url) {
+  const value = String(url || '').trim();
+  if (value.startsWith('<') && value.endsWith('>')) return value.slice(1, -1);
+  return value;
+}
+
+function decodeUrlPath(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeImagePath(value) {
+  let normalized = decodeUrlPath(unwrapImageUrl(value));
+  normalized = normalized.replace(/^file:(?:\/\/)?/i, '');
+  normalized = normalized.replaceAll('\\', '/').replace(/\/{2,}/g, '/');
+  // file:///C:/path 在去掉协议后会多出一个开头的斜杠。
+  if (/^\/[a-z]:\//i.test(normalized)) normalized = normalized.slice(1);
+  return normalized;
+}
+
+function mapExtractedMediaUrl(url, mediaSrc, publicPrefix) {
+  if (/^(?:https?:|data:|blob:|#)/i.test(unwrapImageUrl(url))) return url;
+
+  const normalizedUrl = normalizeImagePath(url);
+  const normalizedMedia = normalizeImagePath(mediaSrc).replace(/\/$/, '');
+  const windowsPath = /^[a-z]:\//i.test(normalizedMedia);
+  const comparableUrl = windowsPath ? normalizedUrl.toLowerCase() : normalizedUrl;
+  const comparableMedia = windowsPath
+    ? normalizedMedia.toLowerCase()
+    : normalizedMedia;
+
+  let relativePath = null;
+  if (comparableUrl.startsWith(`${comparableMedia}/`)) {
+    relativePath = normalizedUrl.slice(normalizedMedia.length + 1);
+  } else {
+    const relativeMatch = normalizedUrl.match(/^(?:\.\/)?media\/(.+)$/i);
+    if (relativeMatch) relativePath = relativeMatch[1];
+  }
+
+  if (relativePath === null) return url;
+  const segments = relativePath.split('/').filter(Boolean);
+  if (!segments.length || segments.some((segment) => segment === '..')) {
+    throw new Error(`Word 图片路径不安全，无法发布：${url}`);
+  }
+
+  const encodedPath = segments.map((segment) => encodeURIComponent(segment)).join('/');
+  return `${publicPrefix.replace(/\/$/, '')}/${encodedPath}`;
+}
+
+/**
+ * Pandoc 会把 --extract-media 的参数原样写入图片地址：
+ * Windows 可能得到 D:\\...\\media/image.png，GitHub Actions 则是 /home/.../media/image.png。
+ * 因此这里不能只替换固定的 "media/" 前缀，而要按实际提取目录做映射。
+ */
+function rewriteDocxMediaReferences(body, { mediaSrc, publicPrefix }) {
+  const rewrite = (url) => mapExtractedMediaUrl(url, mediaSrc, publicPrefix);
+  let out = body.replace(
+    /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/gi,
+    (_match, before, url, after) => `${before}${rewrite(url)}${after}`
+  );
+  out = out.replace(
+    /(!\[[^\]]*\]\()(<[^>]+>|[^)\s]+)([^)]*\))/g,
+    (_match, before, url, after) => `${before}${rewrite(url)}${after}`
+  );
+  return out;
+}
+
+function extractImageUrls(body) {
+  const urls = [];
+  for (const match of body.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi)) {
+    urls.push(unwrapImageUrl(match[1]));
+  }
+  for (const match of body.matchAll(/!\[[^\]]*\]\((<[^>]+>|[^)\s]+)/g)) {
+    urls.push(unwrapImageUrl(match[1]));
+  }
+  return urls;
+}
+
+async function validateDocxImageReferences(body, slug) {
+  const expectedPrefix = `/media/articles/${slug}/`;
+  const mediaRoot = path.resolve(MEDIA_DIR);
+
+  for (const url of extractImageUrls(body)) {
+    if (/^(?:https?:|data:|blob:|#)/i.test(url)) continue;
+    if (!url.startsWith(expectedPrefix)) {
+      throw new Error(
+        `Word 图片路径未正确转换：${url}。请确认图片是直接插入 Word，而不是仅链接到本机文件`
+      );
+    }
+
+    const urlPath = decodeUrlPath(url.split(/[?#]/, 1)[0]);
+    const mediaRelative = urlPath.replace(/^\/media\//, '');
+    const localPath = path.resolve(MEDIA_DIR, ...mediaRelative.split('/'));
+    const insideMediaRoot =
+      localPath === mediaRoot || localPath.startsWith(`${mediaRoot}${path.sep}`);
+    if (!insideMediaRoot) {
+      throw new Error(`Word 图片路径超出站点媒体目录：${url}`);
+    }
+
+    let stat;
+    try {
+      stat = await fs.stat(localPath);
+    } catch {
+      throw new Error(`Word 图片文件缺失，部署已停止：${url}`);
+    }
+    if (!stat.isFile() || stat.size === 0) {
+      throw new Error(`Word 图片文件无效，部署已停止：${url}`);
+    }
+  }
+}
+
 async function processDocx(file, pandoc) {
   const baseName = path.basename(file, path.extname(file));
   const { date, rest } = parseFilename(baseName);
@@ -296,17 +410,21 @@ async function processDocx(file, pandoc) {
   const tmpDir = path.join(GEN_DIR, '.tmp-docx', slug);
   await ensureDir(tmpDir);
   const outFile = path.join(tmpDir, 'body.md');
-  await pExecFile(pandoc, [
-    file,
-    '-f',
-    'docx',
-    '-t',
-    'gfm',
-    '--wrap=none',
-    `--extract-media=${tmpDir}`,
-    '-o',
-    outFile,
-  ]);
+  await pExecFile(
+    pandoc,
+    [
+      file,
+      '-f',
+      'docx',
+      '-t',
+      'gfm',
+      '--wrap=none',
+      '--extract-media=.',
+      '-o',
+      'body.md',
+    ],
+    { cwd: tmpDir, maxBuffer: 16 * 1024 * 1024 }
+  );
   let body = await fs.readFile(outFile, 'utf8');
   const commitMetadata = await getDocxCommitMetadata(file);
   // pandoc 的 gfm 行内公式写成 $`TeX`$（GitHub 风格带反引号），
@@ -326,11 +444,12 @@ async function processDocx(file, pandoc) {
   const mediaSrc = path.join(tmpDir, 'media');
   if (await exists(mediaSrc)) {
     await copyDir(mediaSrc, path.join(MEDIA_DIR, 'articles', slug));
-    body = body
-      .replaceAll('](media/', `](/media/articles/${slug}/`)
-      .replaceAll('src="media/', `src="/media/articles/${slug}/`)
-      .replaceAll("src='media/", `src='/media/articles/${slug}/`);
+    body = rewriteDocxMediaReferences(body, {
+      mediaSrc,
+      publicPrefix: `/media/articles/${slug}`,
+    });
   }
+  await validateDocxImageReferences(body, slug);
 
   const fm = toFrontmatter({
     title,
@@ -748,4 +867,7 @@ export {
   deriveSummary,
   pickRepos,
   decideDocxCommitMetadata,
+  rewriteDocxMediaReferences,
+  extractImageUrls,
+  validateDocxImageReferences,
 };
