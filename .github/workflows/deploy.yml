@@ -18,6 +18,9 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # Word 文章的标题和摘要取自该文件最近一次提交的信息，必须保留完整历史。
+          fetch-depth: 0
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -25,11 +28,17 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: 检查 pandoc（构建机已预装）
-        run: pandoc --version | head -n 1
+      - name: 安装 Pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pandoc
+          pandoc --version
 
       - name: 安装依赖
         run: npm ci
+
+      - name: 检查文章发布规则
+        run: npm test
 
       - name: 生成内容并构建网站
         run: npm run build

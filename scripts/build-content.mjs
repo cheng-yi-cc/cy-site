@@ -26,6 +26,7 @@ const GEN_DIR = path.join(ROOT, 'generated');
 const GEN_ARTICLES = path.join(GEN_DIR, 'articles');
 const GEN_PROJECTS = path.join(GEN_DIR, 'projects');
 const MEDIA_DIR = path.join(ROOT, 'public', 'media');
+const ARTICLE_COMMIT_MARKER = 'config/article-commit-metadata.json';
 const USER_AGENT = 'cy-site-content-builder/1.0';
 const IMAGE_EXT = /\.(png|jpe?g|gif|svg|webp|avif|bmp|ico)(\?.*)?$/i;
 
@@ -77,6 +78,111 @@ function parseFilename(name) {
     return { date, rest: m[4] };
   }
   return { date: null, rest: name };
+}
+
+function normalizeCommitText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 新规则启用后，Word 必须在一次只改该文件的提交中发布。
+ * 纯函数单独保留，便于自动测试所有失败分支。
+ */
+function decideDocxCommitMetadata({
+  markerEnabled,
+  changedPaths,
+  relativePath,
+  subject,
+  body,
+}) {
+  if (!markerEnabled) return null;
+
+  const normalizedPaths = changedPaths.map((p) => p.replaceAll('\\', '/'));
+  if (normalizedPaths.length !== 1 || normalizedPaths[0] !== relativePath) {
+    throw new Error(
+      `Word 文章必须单独提交：本次提交应只修改 ${relativePath}，不要同时修改其他文章或网站代码`
+    );
+  }
+
+  const title = normalizeCommitText(subject);
+  const summary = normalizeCommitText(body);
+  if (!title) {
+    throw new Error(
+      `文章 ${relativePath} 缺少提交名称；请把 GitHub 的提交名称填写为文章标题`
+    );
+  }
+  if (!summary) {
+    throw new Error(
+      `文章 ${relativePath} 缺少提交描述；请填写文章摘要后重新提交`
+    );
+  }
+  return { title, summary };
+}
+
+async function getDocxCommitMetadata(file) {
+  const relativePath = path.relative(ROOT, file).replaceAll('\\', '/');
+  let log;
+  try {
+    ({ stdout: log } = await pExecFile(
+      'git',
+      ['log', '-1', '--format=%H%x00%s%x00%b', '--', relativePath],
+      { cwd: ROOT, maxBuffer: 1024 * 1024 }
+    ));
+  } catch {
+    // 下载源码压缩包或处理尚未提交的本地文件时没有可用的 Git 历史，沿用 Word 内容。
+    return null;
+  }
+
+  const [commit, subject = '', body = ''] = log.split('\0');
+  if (!commit) return null;
+
+  // 迁移兼容：只有文章提交的父版本已包含标记文件时才启用新规则。
+  // 因此本功能上线前的 Word 仍使用文档标题和第一段，不会被历史提交信息改名。
+  let markerEnabled = false;
+  try {
+    await pExecFile(
+      'git',
+      ['cat-file', '-e', `${commit.trim()}^:${ARTICLE_COMMIT_MARKER}`],
+      { cwd: ROOT }
+    );
+    markerEnabled = true;
+  } catch {
+    markerEnabled = false;
+  }
+
+  let changedOutput = '';
+  try {
+    ({ stdout: changedOutput } = await pExecFile(
+      'git',
+      [
+        '-c',
+        'core.quotePath=false',
+        'diff-tree',
+        '--root',
+        '--no-commit-id',
+        '--name-only',
+        '-r',
+        commit.trim(),
+      ],
+      { cwd: ROOT, maxBuffer: 1024 * 1024 }
+    ));
+  } catch (err) {
+    if (markerEnabled) {
+      throw new Error(`无法读取文章提交记录：${err.message}`);
+    }
+  }
+
+  const changedPaths = changedOutput
+    .split(/\r?\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return decideDocxCommitMetadata({
+    markerEnabled,
+    changedPaths,
+    relativePath,
+    subject,
+    body,
+  });
 }
 
 // 从正文第一段提取摘要（跳过标题、图片、代码块、表格、HTML）
@@ -202,16 +308,17 @@ async function processDocx(file, pandoc) {
     outFile,
   ]);
   let body = await fs.readFile(outFile, 'utf8');
+  const commitMetadata = await getDocxCommitMetadata(file);
   // pandoc 的 gfm 行内公式写成 $`TeX`$（GitHub 风格带反引号），
   // remark-math 不认这种写法，把反引号去掉还原成 $TeX$
   body = body
     .replace(/\$\$`([^`]+)`\$\$/g, (_m, tex) => `$$${tex}$$`)
     .replace(/\$`([^`\n]+)`\$/g, (_m, tex) => `$${tex}$`);
 
-  let title = rest;
+  let title = commitMetadata?.title || rest;
   const h1 = body.match(/^\s{0,3}#\s+([^\n]+)$/m);
   if (h1) {
-    title = h1[1].trim();
+    if (!commitMetadata) title = h1[1].trim();
     body = stripLeadingH1(body);
   }
 
@@ -228,7 +335,7 @@ async function processDocx(file, pandoc) {
   const fm = toFrontmatter({
     title,
     date: date || undefined,
-    summary: deriveSummary(body),
+    summary: commitMetadata?.summary || deriveSummary(body),
     source: 'docx',
   });
   await fs.writeFile(
@@ -287,6 +394,7 @@ async function buildArticles() {
   }
   let pandoc = null;
   let ok = 0;
+  const failures = [];
   for (const file of files) {
     try {
       const full = path.join(ARTICLES_DIR, file);
@@ -299,9 +407,15 @@ async function buildArticles() {
       ok++;
     } catch (err) {
       console.warn(`[文章] 处理 ${file} 失败：${err.message}`);
+      failures.push(`${file}：${err.message}`);
     }
   }
   console.log(`[文章] 完成 ${ok}/${files.length} 篇`);
+  if (failures.length) {
+    throw new Error(
+      `有 ${failures.length} 篇文章处理失败，已停止部署：\n- ${failures.join('\n- ')}`
+    );
+  }
 }
 
 /* ---------------- 项目处理（GitHub） ---------------- */
@@ -627,4 +741,11 @@ if (isMain) {
   });
 }
 
-export { rewriteReadme, slugify, stripLeadingH1, deriveSummary, pickRepos };
+export {
+  rewriteReadme,
+  slugify,
+  stripLeadingH1,
+  deriveSummary,
+  pickRepos,
+  decideDocxCommitMetadata,
+};

@@ -9,7 +9,8 @@
     "dev": "astro dev",
     "prebuild": "node scripts/build-content.mjs",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "astro": "^5.0.0",

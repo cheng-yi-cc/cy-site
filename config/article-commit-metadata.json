@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "wordArticleCommitRule": {
+    "oneDocxPerCommit": true,
+    "titleFromCommitSubject": true,
+    "summaryFromCommitBody": true,
+    "requireSummary": true
+  }
+}
