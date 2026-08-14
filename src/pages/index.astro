@@ -3,6 +3,8 @@ import { getCollection } from 'astro:content';
 import Base from '../layouts/Base.astro';
 import ProjectCard from '../components/ProjectCard.astro';
 import ArticleCard from '../components/ArticleCard.astro';
+import HeroParticleScene from '../components/HeroParticleScene.astro';
+import particleAvatar from '../assets/home-particle-avatar.png';
 import site from '../../config/site.json';
 
 const projects = (await getCollection('projects')).sort(
@@ -15,20 +17,26 @@ const latestArticles = articles.slice(0, 6);
 ---
 
 <Base>
-  <section class="hero container">
-    <h1>
-      {site.heroGreeting}，我是 <span class="accent">{site.name}</span>
-    </h1>
-    <p class="bio">{site.bio}</p>
-    <div class="hero-actions">
-      <a
-        class="btn btn-primary"
-        href={site.github}
-        target="_blank"
-        rel="noopener noreferrer">GitHub ↗</a
-      >
-      <a class="btn" href="/articles/">阅读文章</a>
-      <a class="btn" href="/projects/">查看项目</a>
+  <section class="home-hero">
+    <HeroParticleScene avatarSrc={particleAvatar.src} />
+    <div class="hero container">
+      <div class="hero-copy">
+        <p class="hero-kicker">CY · WRITING / BUILDING</p>
+        <h1>
+          {site.heroGreeting}，我是 <span class="accent">{site.name}</span>
+        </h1>
+        <p class="bio">{site.bio}</p>
+        <div class="hero-actions">
+          <a
+            class="btn btn-primary"
+            href={site.github}
+            target="_blank"
+            rel="noopener noreferrer">GitHub ↗</a
+          >
+          <a class="btn" href="/articles/">阅读文章</a>
+          <a class="btn" href="/projects/">查看项目</a>
+        </div>
+      </div>
     </div>
   </section>
 

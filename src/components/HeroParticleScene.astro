@@ -1,0 +1,429 @@
+---
+interface Props {
+  avatarSrc: string;
+}
+
+const { avatarSrc } = Astro.props;
+---
+
+<div
+  class="hero-scene"
+  data-hero-scene
+  data-avatar-src={avatarSrc}
+  aria-hidden="true"
+>
+  <canvas></canvas>
+</div>
+
+<script>
+  type Particle = {
+    nx: number;
+    ny: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    phase: number;
+    driftX: number;
+    driftY: number;
+    accent: boolean;
+  };
+
+  const scene = document.querySelector<HTMLElement>('[data-hero-scene]');
+  const canvas = scene?.querySelector<HTMLCanvasElement>('canvas');
+  const context = canvas?.getContext('2d');
+  const hero = scene?.closest<HTMLElement>('.home-hero');
+
+  if (scene && canvas && context && hero && !scene.dataset.initialized) {
+    scene.dataset.initialized = 'true';
+
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const compactScreen = matchMedia('(max-width: 700px), (pointer: coarse)');
+    const image = new Image();
+    const particles: Particle[] = [];
+
+    let width = 0;
+    let height = 0;
+    let portraitSize = 0;
+    let portraitLeft = 0;
+    let portraitTop = 0;
+    let animationFrame = 0;
+    let lastFrame = 0;
+    let visible = true;
+    let imageReady = false;
+    let gridColor = '';
+    let particleColor = '';
+    let particleAccent = '';
+
+    const pointer = {
+      x: 0,
+      y: 0,
+      targetX: 0,
+      targetY: 0,
+      active: false,
+    };
+
+    const readSceneColors = () => {
+      const styles = getComputedStyle(scene);
+      gridColor = styles.getPropertyValue('--scene-grid-color').trim();
+      particleColor = styles.getPropertyValue('--scene-particle-color').trim();
+      particleAccent = styles
+        .getPropertyValue('--scene-particle-accent')
+        .trim();
+    };
+
+    const updatePortraitBounds = () => {
+      const compact = compactScreen.matches;
+      portraitSize = compact
+        ? Math.min(width * 0.9, height * 0.72, 380)
+        : Math.min(width * 0.43, height * 0.82, 560);
+      const centerX = compact ? width * 0.67 : width * 0.76;
+      const centerY = compact ? height * 0.52 : height * 0.51;
+      portraitLeft = centerX - portraitSize / 2;
+      portraitTop = centerY - portraitSize / 2;
+    };
+
+    const particleTarget = (particle: Particle) => {
+      const parallaxX = pointer.active
+        ? ((pointer.x / Math.max(width, 1)) - 0.5) * 13
+        : 0;
+      const parallaxY = pointer.active
+        ? ((pointer.y / Math.max(height, 1)) - 0.5) * 9
+        : 0;
+
+      return {
+        x: portraitLeft + particle.nx * portraitSize + parallaxX,
+        y: portraitTop + particle.ny * portraitSize + parallaxY,
+      };
+    };
+
+    const settleParticles = (scatter = false) => {
+      for (const particle of particles) {
+        const target = particleTarget(particle);
+        const distance = scatter ? 18 + (particle.phase % 1) * 34 : 0;
+        particle.x = target.x + Math.cos(particle.phase) * distance;
+        particle.y = target.y + Math.sin(particle.phase) * distance;
+        particle.vx = 0;
+        particle.vy = 0;
+      }
+    };
+
+    const sampleAvatar = () => {
+      if (!imageReady) return;
+
+      const sampleSize = compactScreen.matches ? 230 : 350;
+      const stride = compactScreen.matches ? 3 : 2;
+      const pointLimit = compactScreen.matches ? 720 : 1900;
+      const offscreen = document.createElement('canvas');
+      const offscreenContext = offscreen.getContext('2d', {
+        willReadFrequently: true,
+      });
+      if (!offscreenContext) return;
+
+      offscreen.width = sampleSize;
+      offscreen.height = sampleSize;
+      offscreenContext.fillStyle = '#fff';
+      offscreenContext.fillRect(0, 0, sampleSize, sampleSize);
+      offscreenContext.drawImage(image, 0, 0, sampleSize, sampleSize);
+
+      const pixels = offscreenContext.getImageData(
+        0,
+        0,
+        sampleSize,
+        sampleSize
+      ).data;
+      const candidates: Array<[number, number]> = [];
+
+      for (let y = 0; y < sampleSize; y += stride) {
+        for (let x = 0; x < sampleSize; x += stride) {
+          const index = (y * sampleSize + x) * 4;
+          const luminance =
+            pixels[index] * 0.2126 +
+            pixels[index + 1] * 0.7152 +
+            pixels[index + 2] * 0.0722;
+          if (pixels[index + 3] > 24 && luminance < 174) {
+            candidates.push([x, y]);
+          }
+        }
+      }
+
+      particles.length = 0;
+      const count = Math.min(candidates.length, pointLimit);
+      const selectionStep = candidates.length / Math.max(count, 1);
+
+      for (let i = 0; i < count; i += 1) {
+        const [x, y] = candidates[Math.floor(i * selectionStep)];
+        const phase = ((x * 17 + y * 29 + i * 7) % 628) / 100;
+        particles.push({
+          nx: x / (sampleSize - 1),
+          ny: y / (sampleSize - 1),
+          x: 0,
+          y: 0,
+          vx: 0,
+          vy: 0,
+          phase,
+          driftX: Math.cos(phase) * 0.65,
+          driftY: Math.sin(phase) * 0.36,
+          accent: i % 23 === 0,
+        });
+      }
+
+      settleParticles(!reducedMotion.matches);
+    };
+
+    const resize = () => {
+      const bounds = scene.getBoundingClientRect();
+      width = Math.max(1, bounds.width);
+      height = Math.max(1, bounds.height);
+      const pixelRatio = Math.min(devicePixelRatio || 1, 1.5);
+      canvas.width = Math.round(width * pixelRatio);
+      canvas.height = Math.round(height * pixelRatio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      updatePortraitBounds();
+      if (imageReady) sampleAvatar();
+      render(performance.now(), true);
+    };
+
+    const addGridPoint = (
+      x: number,
+      y: number,
+      move: boolean,
+      radius: number,
+      radiusSquared: number
+    ) => {
+      let warpedX = x;
+      let warpedY = y;
+
+      if (pointer.active && !reducedMotion.matches) {
+        const dx = x - pointer.x;
+        const dy = y - pointer.y;
+        const distanceSquared = dx * dx + dy * dy;
+
+        if (distanceSquared > 0.01 && distanceSquared < radiusSquared) {
+          const distance = Math.sqrt(distanceSquared);
+          const strength = (1 - distance / radius) ** 2 * 24;
+          warpedX += (dx / distance) * strength;
+          warpedY += (dy / distance) * strength;
+        }
+      }
+
+      if (move) context.moveTo(warpedX, warpedY);
+      else context.lineTo(warpedX, warpedY);
+    };
+
+    const drawGrid = () => {
+      const spacing = compactScreen.matches ? 46 : 58;
+      const segment = compactScreen.matches ? 18 : 14;
+      const radius = compactScreen.matches ? 105 : 175;
+      const radiusSquared = radius * radius;
+      const offsetX = pointer.active ? (pointer.x - width / 2) * 0.007 : 0;
+      const offsetY = pointer.active ? (pointer.y - height / 2) * 0.007 : 0;
+      context.strokeStyle = gridColor;
+      context.lineWidth = 0.75;
+
+      for (let x = -spacing + offsetX; x <= width + spacing; x += spacing) {
+        context.beginPath();
+        for (let y = -segment; y <= height + segment; y += segment) {
+          addGridPoint(
+            x,
+            y,
+            y === -segment,
+            radius,
+            radiusSquared
+          );
+        }
+        context.stroke();
+      }
+
+      for (let y = -spacing + offsetY; y <= height + spacing; y += spacing) {
+        context.beginPath();
+        for (let x = -segment; x <= width + segment; x += segment) {
+          addGridPoint(
+            x,
+            y,
+            x === -segment,
+            radius,
+            radiusSquared
+          );
+        }
+        context.stroke();
+      }
+    };
+
+    const drawParticles = (time: number, staticFrame: boolean) => {
+      const interactionRadius = compactScreen.matches ? 88 : 138;
+      const spring = staticFrame ? 1 : 0.065;
+      const damping = staticFrame ? 0 : 0.82;
+      const particleSize = compactScreen.matches ? 1.15 : 1.4;
+      const interactionRadiusSquared = interactionRadius * interactionRadius;
+      const parallaxX = pointer.active
+        ? ((pointer.x / Math.max(width, 1)) - 0.5) * 13
+        : 0;
+      const parallaxY = pointer.active
+        ? ((pointer.y / Math.max(height, 1)) - 0.5) * 9
+        : 0;
+      const driftWave = reducedMotion.matches
+        ? 0
+        : Math.sin(time * 0.00055);
+      const regularPath = new Path2D();
+      const accentPath = new Path2D();
+
+      for (const particle of particles) {
+        let targetX =
+          portraitLeft +
+          particle.nx * portraitSize +
+          parallaxX +
+          driftWave * particle.driftX;
+        let targetY =
+          portraitTop +
+          particle.ny * portraitSize +
+          parallaxY +
+          driftWave * particle.driftY;
+
+        if (pointer.active && !staticFrame) {
+          const dx = targetX - pointer.x;
+          const dy = targetY - pointer.y;
+          const distanceSquared = dx * dx + dy * dy;
+
+          if (
+            distanceSquared > 0.01 &&
+            distanceSquared < interactionRadiusSquared
+          ) {
+            const distance = Math.sqrt(distanceSquared);
+            const force = (1 - distance / interactionRadius) ** 2;
+            targetX += (dx / distance) * force * 42 - (dy / distance) * force * 8;
+            targetY += (dy / distance) * force * 42 + (dx / distance) * force * 8;
+          }
+        }
+
+        particle.vx = (particle.vx + (targetX - particle.x) * spring) * damping;
+        particle.vy = (particle.vy + (targetY - particle.y) * spring) * damping;
+
+        if (staticFrame) {
+          particle.x = targetX;
+          particle.y = targetY;
+        } else {
+          particle.x += particle.vx;
+          particle.y += particle.vy;
+        }
+
+        const size = particle.accent ? particleSize * 1.45 : particleSize;
+        const path = particle.accent ? accentPath : regularPath;
+        path.rect(particle.x, particle.y, size, size);
+      }
+
+      context.fillStyle = particleColor;
+      context.fill(regularPath);
+      context.fillStyle = particleAccent;
+      context.fill(accentPath);
+    };
+
+    function render(time: number, staticFrame = false) {
+      context.clearRect(0, 0, width, height);
+      drawGrid();
+      drawParticles(time, staticFrame || reducedMotion.matches);
+    }
+
+    const animate = (time: number) => {
+      if (!visible || reducedMotion.matches) {
+        animationFrame = 0;
+        return;
+      }
+
+      const minimumFrameTime = compactScreen.matches ? 1000 / 30 : 1000 / 60;
+      const elapsed = time - lastFrame;
+      if (elapsed >= minimumFrameTime) {
+        pointer.x += (pointer.targetX - pointer.x) * 0.16;
+        pointer.y += (pointer.targetY - pointer.y) * 0.16;
+        render(time);
+        lastFrame = time - (elapsed % minimumFrameTime);
+      }
+      animationFrame = requestAnimationFrame(animate);
+    };
+
+    const startAnimation = () => {
+      if (!animationFrame && visible && !reducedMotion.matches) {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    };
+
+    const stopAnimation = () => {
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+      animationFrame = 0;
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') return;
+      const bounds = scene.getBoundingClientRect();
+      pointer.targetX = event.clientX - bounds.left;
+      pointer.targetY = event.clientY - bounds.top;
+      if (!pointer.active) {
+        pointer.x = pointer.targetX;
+        pointer.y = pointer.targetY;
+      }
+      pointer.active = true;
+      startAnimation();
+    };
+
+    const handlePointerLeave = () => {
+      pointer.active = false;
+    };
+
+    const handleMotionPreference = () => {
+      if (reducedMotion.matches) {
+        stopAnimation();
+        pointer.active = false;
+        settleParticles();
+        render(performance.now(), true);
+      } else {
+        startAnimation();
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(scene);
+
+    const intersectionObserver = new IntersectionObserver(
+      ([entry]) => {
+        visible = entry.isIntersecting && !document.hidden;
+        if (visible) startAnimation();
+        else stopAnimation();
+      },
+      { threshold: 0.01 }
+    );
+    intersectionObserver.observe(hero);
+
+    const themeObserver = new MutationObserver(() => {
+      readSceneColors();
+      render(performance.now(), reducedMotion.matches);
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+
+    hero.addEventListener('pointermove', handlePointerMove, { passive: true });
+    hero.addEventListener('pointerleave', handlePointerLeave);
+    reducedMotion.addEventListener('change', handleMotionPreference);
+    compactScreen.addEventListener('change', resize);
+    document.addEventListener('visibilitychange', () => {
+      visible = !document.hidden && hero.getBoundingClientRect().bottom > 0;
+      if (visible) startAnimation();
+      else stopAnimation();
+    });
+
+    image.addEventListener('load', () => {
+      imageReady = true;
+      sampleAvatar();
+      render(performance.now(), reducedMotion.matches);
+      startAnimation();
+    });
+
+    readSceneColors();
+    resize();
+    image.src = scene.dataset.avatarSrc ?? '';
+    startAnimation();
+  }
+</script>

@@ -6,3 +6,5 @@ config/.github-token
 .astro/
 .DS_Store
 Thumbs.db
+AGENTS.md
+CLAUDE.md

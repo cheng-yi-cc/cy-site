@@ -185,15 +185,100 @@ main {
 /* ============================================================
    Hero
    ============================================================ */
+.home-hero {
+  position: relative;
+  min-height: clamp(500px, 68vh, 650px);
+  overflow: hidden;
+  isolation: isolate;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.home-hero::before,
+.home-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.home-hero::before {
+  z-index: 1;
+  background:
+    linear-gradient(
+      90deg,
+      var(--bg) 0%,
+      color-mix(in srgb, var(--bg) 94%, transparent) 34%,
+      color-mix(in srgb, var(--bg) 52%, transparent) 55%,
+      transparent 76%
+    ),
+    linear-gradient(
+      0deg,
+      var(--bg) 0%,
+      color-mix(in srgb, var(--bg) 84%, transparent) 8%,
+      transparent 32%
+    );
+}
+
+.home-hero::after {
+  z-index: 0;
+  opacity: 0.12;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+  mix-blend-mode: soft-light;
+}
+
+.hero-scene {
+  --scene-grid-color: rgb(73 62 43 / 0.13);
+  --scene-particle-color: rgb(38 34 25 / 0.5);
+  --scene-particle-accent: rgb(176 83 42 / 0.78);
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000 0%, #000 76%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 76%, transparent 100%);
+}
+
+:root[data-theme='dark'] .hero-scene {
+  --scene-grid-color: rgb(224 133 90 / 0.14);
+  --scene-particle-color: rgb(233 228 216 / 0.52);
+  --scene-particle-accent: rgb(224 133 90 / 0.88);
+}
+
+.hero-scene canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .hero {
-  padding: 72px 24px 44px;
+  position: relative;
+  z-index: 2;
+  min-height: clamp(500px, 68vh, 650px);
+  display: flex;
+  align-items: center;
+  padding-top: 74px;
+  padding-bottom: 82px;
+}
+
+.hero-copy {
+  width: min(610px, 57%);
+}
+
+.hero-kicker {
+  margin: 0 0 18px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.13em;
 }
 
 .hero h1 {
-  font-size: clamp(1.9rem, 5vw, 2.9rem);
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-  margin: 0 0 16px;
+  max-width: 560px;
+  font-size: clamp(2.25rem, 5vw, 3.5rem);
+  line-height: 1.13;
+  letter-spacing: -0.045em;
+  margin: 0 0 20px;
 }
 
 .hero h1 .accent {
@@ -202,9 +287,9 @@ main {
 
 .hero .bio {
   color: var(--text-2);
-  max-width: 620px;
-  font-size: 1.05rem;
-  margin: 0 0 26px;
+  max-width: 540px;
+  font-size: 1.08rem;
+  margin: 0 0 30px;
 }
 
 .hero-actions {
@@ -759,8 +844,39 @@ main {
     grid-template-columns: 1fr;
   }
 
+  .home-hero,
   .hero {
-    padding-top: 48px;
+    min-height: 560px;
+  }
+
+  .home-hero::before {
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--bg) 96%, transparent) 0%,
+        color-mix(in srgb, var(--bg) 78%, transparent) 64%,
+        transparent 100%
+      ),
+      linear-gradient(
+        0deg,
+        var(--bg) 0%,
+        color-mix(in srgb, var(--bg) 82%, transparent) 14%,
+        transparent 44%
+      );
+  }
+
+  .hero {
+    align-items: flex-end;
+    padding-top: 86px;
+    padding-bottom: 66px;
+  }
+
+  .hero-copy {
+    width: 100%;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.15rem, 11vw, 3rem);
   }
 
   .header-inner {
@@ -770,5 +886,11 @@ main {
   .site-header nav {
     gap: 14px;
     font-size: 0.9rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
 }
