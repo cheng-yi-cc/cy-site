@@ -846,23 +846,16 @@ main {
 
   .home-hero,
   .hero {
-    min-height: 560px;
+    min-height: 640px;
   }
 
   .home-hero::before {
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--bg) 96%, transparent) 0%,
-        color-mix(in srgb, var(--bg) 78%, transparent) 64%,
-        transparent 100%
-      ),
-      linear-gradient(
-        0deg,
-        var(--bg) 0%,
-        color-mix(in srgb, var(--bg) 82%, transparent) 14%,
-        transparent 44%
-      );
+    background: linear-gradient(
+      0deg,
+      var(--bg) 0%,
+      color-mix(in srgb, var(--bg) 82%, transparent) 12%,
+      transparent 34%
+    );
   }
 
   .hero {

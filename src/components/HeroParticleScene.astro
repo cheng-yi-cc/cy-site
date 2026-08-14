@@ -51,15 +51,19 @@ const { avatarSrc } = Astro.props;
     let lastFrame = 0;
     let visible = true;
     let imageReady = false;
+    let compactEntranceComplete = false;
+    let compactEntranceTimer = 0;
     let gridColor = '';
     let particleColor = '';
     let particleAccent = '';
 
+    const compactEntranceDuration = 1400;
+    const desktopParticleLimit = 1900;
+    const compactParticleLimit = 1200;
+
     const pointer = {
       x: 0,
       y: 0,
-      targetX: 0,
-      targetY: 0,
       active: false,
     };
 
@@ -75,10 +79,10 @@ const { avatarSrc } = Astro.props;
     const updatePortraitBounds = () => {
       const compact = compactScreen.matches;
       portraitSize = compact
-        ? Math.min(width * 0.9, height * 0.72, 380)
+        ? Math.min(width * 0.9, height * 0.58, 390)
         : Math.min(width * 0.43, height * 0.82, 560);
-      const centerX = compact ? width * 0.67 : width * 0.76;
-      const centerY = compact ? height * 0.52 : height * 0.51;
+      const centerX = compact ? width * 0.5 : width * 0.76;
+      const centerY = compact ? height * 0.295 : height * 0.51;
       portraitLeft = centerX - portraitSize / 2;
       portraitTop = centerY - portraitSize / 2;
     };
@@ -113,7 +117,9 @@ const { avatarSrc } = Astro.props;
 
       const sampleSize = compactScreen.matches ? 230 : 350;
       const stride = compactScreen.matches ? 3 : 2;
-      const pointLimit = compactScreen.matches ? 720 : 1900;
+      const pointLimit = compactScreen.matches
+        ? compactParticleLimit
+        : desktopParticleLimit;
       const offscreen = document.createElement('canvas');
       const offscreenContext = offscreen.getContext('2d', {
         willReadFrequently: true,
@@ -168,7 +174,10 @@ const { avatarSrc } = Astro.props;
         });
       }
 
-      settleParticles(!reducedMotion.matches);
+      const shouldScatter =
+        !reducedMotion.matches &&
+        (!compactScreen.matches || !compactEntranceComplete);
+      settleParticles(shouldScatter);
     };
 
     const resize = () => {
@@ -254,8 +263,16 @@ const { avatarSrc } = Astro.props;
 
     const drawParticles = (time: number, staticFrame: boolean) => {
       const interactionRadius = compactScreen.matches ? 88 : 138;
-      const spring = staticFrame ? 1 : 0.065;
-      const damping = staticFrame ? 0 : 0.82;
+      const spring = staticFrame
+        ? 1
+        : compactScreen.matches
+          ? 0.065
+          : 0.22;
+      const damping = staticFrame
+        ? 0
+        : compactScreen.matches
+          ? 0.82
+          : 0.48;
       const particleSize = compactScreen.matches ? 1.15 : 1.4;
       const interactionRadiusSquared = interactionRadius * interactionRadius;
       const parallaxX = pointer.active
@@ -335,8 +352,6 @@ const { avatarSrc } = Astro.props;
       const minimumFrameTime = compactScreen.matches ? 1000 / 30 : 1000 / 60;
       const elapsed = time - lastFrame;
       if (elapsed >= minimumFrameTime) {
-        pointer.x += (pointer.targetX - pointer.x) * 0.16;
-        pointer.y += (pointer.targetY - pointer.y) * 0.16;
         render(time);
         lastFrame = time - (elapsed % minimumFrameTime);
       }
@@ -344,7 +359,14 @@ const { avatarSrc } = Astro.props;
     };
 
     const startAnimation = () => {
-      if (!animationFrame && visible && !reducedMotion.matches) {
+      const compactAnimationFinished =
+        compactScreen.matches && compactEntranceComplete;
+      if (
+        !animationFrame &&
+        visible &&
+        !reducedMotion.matches &&
+        !compactAnimationFinished
+      ) {
         animationFrame = requestAnimationFrame(animate);
       }
     };
@@ -354,15 +376,32 @@ const { avatarSrc } = Astro.props;
       animationFrame = 0;
     };
 
-    const handlePointerMove = (event: PointerEvent) => {
-      if (event.pointerType === 'touch') return;
-      const bounds = scene.getBoundingClientRect();
-      pointer.targetX = event.clientX - bounds.left;
-      pointer.targetY = event.clientY - bounds.top;
-      if (!pointer.active) {
-        pointer.x = pointer.targetX;
-        pointer.y = pointer.targetY;
+    const scheduleCompactEntranceEnd = () => {
+      if (compactEntranceTimer) window.clearTimeout(compactEntranceTimer);
+      compactEntranceTimer = 0;
+      if (
+        !compactScreen.matches ||
+        reducedMotion.matches ||
+        !imageReady
+      ) {
+        return;
       }
+
+      compactEntranceTimer = window.setTimeout(() => {
+        compactEntranceTimer = 0;
+        if (!compactScreen.matches) return;
+        compactEntranceComplete = true;
+        settleParticles();
+        render(performance.now(), true);
+        stopAnimation();
+      }, compactEntranceDuration);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (compactScreen.matches || event.pointerType === 'touch') return;
+      const bounds = scene.getBoundingClientRect();
+      pointer.x = event.clientX - bounds.left;
+      pointer.y = event.clientY - bounds.top;
       pointer.active = true;
       startAnimation();
     };
@@ -374,7 +413,10 @@ const { avatarSrc } = Astro.props;
     const handleMotionPreference = () => {
       if (reducedMotion.matches) {
         stopAnimation();
+        if (compactEntranceTimer) window.clearTimeout(compactEntranceTimer);
+        compactEntranceTimer = 0;
         pointer.active = false;
+        if (compactScreen.matches) compactEntranceComplete = true;
         settleParticles();
         render(performance.now(), true);
       } else {
@@ -397,7 +439,11 @@ const { avatarSrc } = Astro.props;
 
     const themeObserver = new MutationObserver(() => {
       readSceneColors();
-      render(performance.now(), reducedMotion.matches);
+      render(
+        performance.now(),
+        reducedMotion.matches ||
+          (compactScreen.matches && compactEntranceComplete)
+      );
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
@@ -407,7 +453,13 @@ const { avatarSrc } = Astro.props;
     hero.addEventListener('pointermove', handlePointerMove, { passive: true });
     hero.addEventListener('pointerleave', handlePointerLeave);
     reducedMotion.addEventListener('change', handleMotionPreference);
-    compactScreen.addEventListener('change', resize);
+    compactScreen.addEventListener('change', () => {
+      pointer.active = false;
+      compactEntranceComplete = false;
+      resize();
+      scheduleCompactEntranceEnd();
+      startAnimation();
+    });
     document.addEventListener('visibilitychange', () => {
       visible = !document.hidden && hero.getBoundingClientRect().bottom > 0;
       if (visible) startAnimation();
@@ -416,8 +468,15 @@ const { avatarSrc } = Astro.props;
 
     image.addEventListener('load', () => {
       imageReady = true;
+      if (compactScreen.matches) {
+        compactEntranceComplete = reducedMotion.matches;
+      }
       sampleAvatar();
-      render(performance.now(), reducedMotion.matches);
+      render(
+        performance.now(),
+        reducedMotion.matches || compactEntranceComplete
+      );
+      scheduleCompactEntranceEnd();
       startAnimation();
     });
 
