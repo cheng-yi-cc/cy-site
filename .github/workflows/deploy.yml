@@ -3,6 +3,10 @@ name: 构建并部署网站
 on:
   push:
     branches: [main, master]
+  # 定期重建会重新抓取展示项目的 README 与仓库元信息。
+  # GitHub Actions 的 cron 使用 UTC；对应北京时间约 02:23、08:23、14:23、20:23。
+  schedule:
+    - cron: '23 */6 * * *'
   workflow_dispatch:
 
 permissions:
