@@ -1,0 +1,66 @@
+name: PR 自动合并
+
+on:
+  workflow_run:
+    workflows: [PR 检查]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: 合并已通过检查的 PR
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    steps:
+      - name: 合并已验证的提交
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          pr_path="repos/${REPOSITORY}/pulls/${PR_NUMBER}"
+          pr_state="$(gh api "${pr_path}" --jq '.state')"
+          pr_draft="$(gh api "${pr_path}" --jq '.draft')"
+          current_head_sha="$(gh api "${pr_path}" --jq '.head.sha')"
+
+          if [[ "${pr_state}" != "open" ]]; then
+            echo "PR #${PR_NUMBER} 已不是打开状态，跳过自动合并。"
+            exit 0
+          fi
+
+          if [[ "${pr_draft}" == "true" ]]; then
+            echo "PR #${PR_NUMBER} 仍是草稿，跳过自动合并。"
+            exit 0
+          fi
+
+          if [[ "${current_head_sha}" != "${HEAD_SHA}" ]]; then
+            echo "PR #${PR_NUMBER} 在测试完成后又产生了新提交，跳过旧提交的自动合并。"
+            exit 0
+          fi
+
+          merged="$(gh api --method PUT "${pr_path}/merge" \
+            -f sha="${HEAD_SHA}" \
+            -f merge_method=squash \
+            --jq '.merged')"
+
+          if [[ "${merged}" != "true" ]]; then
+            echo "PR #${PR_NUMBER} 未能自动合并。"
+            exit 1
+          fi
+
+          echo "PR #${PR_NUMBER} 已自动合并。"
+
+          # GITHUB_TOKEN 触发的合并可能不会再次触发 push 工作流，
+          # 因此显式启动部署工作流，确保合并后网站一定重新构建并发布。
+          gh workflow run deploy.yml --repo "${REPOSITORY}" --ref main
+          echo "已触发 main 分支的构建部署工作流。"
