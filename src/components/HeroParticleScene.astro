@@ -58,8 +58,7 @@ const { avatarSrc } = Astro.props;
     let particleAccent = '';
 
     const compactEntranceDuration = 1400;
-    const desktopParticleLimit = 1900;
-    const compactParticleLimit = 1200;
+    const particleLimit = 1900;
 
     const pointer = {
       x: 0,
@@ -115,11 +114,9 @@ const { avatarSrc } = Astro.props;
     const sampleAvatar = () => {
       if (!imageReady) return;
 
-      const sampleSize = compactScreen.matches ? 230 : 350;
-      const stride = compactScreen.matches ? 3 : 2;
-      const pointLimit = compactScreen.matches
-        ? compactParticleLimit
-        : desktopParticleLimit;
+      const sampleSize = 350;
+      const stride = 2;
+      const pointLimit = particleLimit;
       const offscreen = document.createElement('canvas');
       const offscreenContext = offscreen.getContext('2d', {
         willReadFrequently: true,
@@ -349,7 +346,7 @@ const { avatarSrc } = Astro.props;
         return;
       }
 
-      const minimumFrameTime = compactScreen.matches ? 1000 / 30 : 1000 / 60;
+      const minimumFrameTime = 1000 / 60;
       const elapsed = time - lastFrame;
       if (elapsed >= minimumFrameTime) {
         render(time);
