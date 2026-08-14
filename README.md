@@ -1,6 +1,6 @@
 # CY 的个人网站
 
-卡片作品集风格的个人网站：展示文章（支持 Word 和 Markdown）与 GitHub 项目（README 可折叠展示）。
+卡片作品集风格的个人网站：展示文章（支持 Word 和 Markdown）与 GitHub 项目（README 可折叠展示）。首页使用 Canvas 绘制交互网格与粒子头像，并适配亮暗主题、移动端和系统“减少动态效果”设置。
 
 - 构建：[Astro](https://astro.build)（纯静态输出）
 - 部署：Cloudflare Pages（中国大陆可直连，免备案）
@@ -29,6 +29,7 @@ config/site.json           ← 网站标题、简介、GitHub 主页、统计 to
 config/projects.json       ← 要展示的项目仓库列表
 scripts/build-content.mjs  ← 内容构建脚本（docx 转换 + 项目抓取）
 src/                       ← Astro 页面与样式
+src/assets/home-particle-avatar.png ← 首页粒子头像原图
 .github/workflows/         ← 自动部署流水线
 generated/、public/media/  ← 构建产物，勿手动修改（已 gitignore）
 ```
@@ -111,6 +112,10 @@ GitHub 链接，图片会转存到本站。
 | `bio` | 首页简介 |
 | `github` | 你的 GitHub 主页地址 |
 | `cfAnalyticsToken` | Cloudflare 访问统计 token（见下文） |
+
+### 更换首页粒子头像
+
+用新的正方形、高对比度线稿替换 `src/assets/home-particle-avatar.png`，保持文件名不变即可。背景脚本会自动采样深色线条生成粒子；替换后运行 `npm run build` 检查资源能否正常打包。粒子数量和刷新率已经针对 Chrome 做过优化，如需提高，应先在高刷新率屏幕上进行性能测试。
 
 ## 本地开发
 
